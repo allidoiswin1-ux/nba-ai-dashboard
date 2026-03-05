@@ -43,7 +43,7 @@ if player_name:
         std = df[stat].std()
 
         prob_over = 1 - (
-            0.5*(1+np.math.erf((line-projection)/(std*np.sqrt(2))))
+            0.5*(1+math.erf((line-projection)/(std*np.sqrt(2))))
         )
 
         edge = projection - line
