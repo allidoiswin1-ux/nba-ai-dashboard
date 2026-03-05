@@ -1,3 +1,4 @@
+xed"}
 import pandas as pd
 import requests
 import datetime
@@ -85,5 +86,5 @@ def generate_data():
     print("props_data.csv updated with real players")
 
 
-if name == "__name__":
-    generate_data()
+if name == "main":
+    generate_d
