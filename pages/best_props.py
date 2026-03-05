@@ -1,129 +1,197 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import requests
 from datetime import datetime
+from nba_api.stats.endpoints import scoreboardv2, boxscoretraditionalv2
 
-from nba_api.stats.static import players
-from nba_api.stats.endpoints import playergamelog, scoreboardv2
+st.set_page_config(page_title="NBA Prop Scanner", layout="wide")
 
-
-st.set_page_config(page_title="NBA Props Scanner", layout="wide")
-
-st.title("🔥 Best NBA Props Scanner")
-
-if st.button("Refresh Model"):
-    st.cache_data.clear()
-
+st.title("🔥 NBA Prop Scanner")
 
 STAT = st.selectbox("Stat Type", ["PTS", "REB", "AST"])
+
+ODDS_API_KEY = "PASTE_YOUR_ODDS_API_KEY_HERE"
 
 today = datetime.today().strftime("%m/%d/%Y")
 
 
-@st.cache_data(ttl=3600)
-def get_today_games(date):
-    try:
-        board = scoreboardv2.ScoreboardV2(game_date=date)
-        games = board.get_data_frames()[0]
-        return games
-    except:
-        return pd.DataFrame()
-
+# -----------------------------
+# CACHE DATA (1 HOUR REFRESH)
+# -----------------------------
 
 @st.cache_data(ttl=3600)
-def get_player_logs(player_id):
-    try:
-        gamelog = playergamelog.PlayerGameLog(player_id=player_id)
-        df = gamelog.get_data_frames()[0]
-        return df
-    except:
-        return pd.DataFrame()
+def get_games():
+    board = scoreboardv2.ScoreboardV2(game_date=today)
+    return board.get_data_frames()[0]
 
 
-games = get_today_games(today)
+@st.cache_data(ttl=3600)
+def get_boxscore(game_id):
+    box = boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id)
+    return box.get_data_frames()[0]
+
+
+@st.cache_data(ttl=3600)
+def get_odds():
+
+    url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "us",
+        "markets": "player_points,player_rebounds,player_assists",
+        "bookmakers": "draftkings,fanduel"
+    }
+
+    r = requests.get(url, params=params)
+
+    if r.status_code != 200:
+        return []
+
+    return r.json()
+
+
+# -----------------------------
+# GET TONIGHT'S GAMES
+# -----------------------------
+
+games = get_games()
 
 if games.empty:
-    st.warning("No NBA games today")
+    st.warning("No NBA games tonight")
     st.stop()
 
-
-st.write(f"Games today: {len(games)}")
-
-
-all_players = players.get_active_players()
-
-# Scan more players but keep performance stable
-players_to_scan = all_players[:120]
-
-results = []
-
-progress = st.progress(0)
+st.write(f"Games tonight: {len(games)}")
 
 
-for i, p in enumerate(players_to_scan):
+# -----------------------------
+# GET PLAYERS IN TONIGHT'S GAMES
+# -----------------------------
 
-    name = p["full_name"]
-    player_id = p["id"]
+players = []
+
+for _, game in games.iterrows():
+
+    game_id = game["GAME_ID"]
 
     try:
 
-        df = get_player_logs(player_id)
+        box = get_boxscore(game_id)
 
-        if df.empty:
-            continue
+        home = game["HOME_TEAM_ABBREVIATION"]
+        away = game["VISITOR_TEAM_ABBREVIATION"]
 
-        if len(df) < 5:
-            continue
+        matchup = f"{away} @ {home}"
 
-        matchup = df.iloc[0]["MATCHUP"]
+        for _, row in box.iterrows():
 
-        last5 = df.head(5)[STAT].mean()
-        season = df[STAT].mean()
-
-        projection = (last5 * 0.7) + (season * 0.3)
-
-        line = round(season, 1)
-
-        std = df[STAT].std()
-
-        if std == 0:
-            prob = 0.5
-        else:
-            prob = 1 - (
-                0.5 * (1 + np.math.erf((line - projection) / (std * np.sqrt(2))))
-            )
-
-        edge = projection - line
-
-        results.append(
-            {
-                "Player": name,
+            players.append({
+                "Player": row["PLAYER_NAME"],
+                "Team": row["TEAM_ABBREVIATION"],
                 "Matchup": matchup,
-                "Line": round(line, 1),
-                "Projection": round(projection, 2),
-                "Edge": round(edge, 2),
-                "Over Prob %": round(prob * 100, 1),
-            }
-        )
+                "PTS": row["PTS"],
+                "REB": row["REB"],
+                "AST": row["AST"]
+            })
 
     except:
         continue
 
-    progress.progress((i + 1) / len(players_to_scan))
+
+players_df = pd.DataFrame(players)
 
 
-df = pd.DataFrame(results)
+# -----------------------------
+# GET SPORTSBOOK LINES
+# -----------------------------
+
+odds_data = get_odds()
+
+lines = []
+
+for game in odds_data:
+
+    for book in game.get("bookmakers", []):
+
+        book_name = book["title"]
+
+        for market in book.get("markets", []):
+
+            stat_map = {
+                "player_points": "PTS",
+                "player_rebounds": "REB",
+                "player_assists": "AST"
+            }
+
+            stat_type = stat_map.get(market["key"])
+
+            for outcome in market.get("outcomes", []):
+
+                lines.append({
+                    "Player": outcome.get("description"),
+                    "Line": outcome.get("point"),
+                    "Book": book_name,
+                    "Stat": stat_type
+                })
+
+
+lines_df = pd.DataFrame(lines)
+
+
+# -----------------------------
+# MERGE MODEL + SPORTSBOOK
+# -----------------------------
+
+df = players_df.merge(lines_df, how="left", on="Player")
+
+df = df[df["Stat"] == STAT]
+
 
 if df.empty:
-    st.warning("No props found")
+    st.warning("No prop data available yet")
     st.stop()
 
 
-df = df.sort_values(["Over Prob %", "Edge"], ascending=False)
+# -----------------------------
+# PROJECTION MODEL
+# -----------------------------
+
+df["Projection"] = df[STAT] * 1.15
+
+df["Edge"] = df["Projection"] - df["Line"]
+
+df["Probability"] = 50 + (df["Edge"] * 6)
+
+df["Probability"] = df["Probability"].clip(50, 80)
+
+
+# -----------------------------
+# RANK BEST PROPS
+# -----------------------------
+
+df = df.sort_values("Edge", ascending=False)
 
 df.insert(0, "Rank", range(1, len(df) + 1))
 
 
-st.subheader("🔥 Top Props Today")
+# -----------------------------
+# DISPLAY RESULTS
+# -----------------------------
 
-st.dataframe(df, use_container_width=True)
+st.subheader("🔥 Best Props Tonight")
+
+st.dataframe(
+    df[
+        [
+            "Rank",
+            "Player",
+            "Matchup",
+            "Book",
+            "Line",
+            "Projection",
+            "Edge",
+            "Probability"
+        ]
+    ],
+    use_container_width=True
+)
