@@ -6,26 +6,40 @@ DATA_FILE = "props_data.csv"
 
 def get_games_today():
     today = datetime.date.today().strftime("%Y%m%d")
+
     url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={today}"
-    
-    try:
-        response = requests.get(url)
-        data = response.json()
-    except:
-        return []
+
+    r = requests.get(url).json()
 
     games = []
 
-    if "events" in data:
-        for event in data["events"]:
+    if "events" in r:
+        for event in r["events"]:
             comp = event["competitions"][0]
 
             home = comp["competitors"][0]["team"]["abbreviation"]
             away = comp["competitors"][1]["team"]["abbreviation"]
 
-            games.append(f"{away} @ {home}")
+            games.append((home, away, f"{away} @ {home}"))
 
     return games
+
+
+def get_roster(team):
+
+    url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{team}/roster"
+
+    try:
+        r = requests.get(url).json()
+        players = []
+
+        for athlete in r["athletes"]:
+            players.append(athlete["fullName"])
+
+        return players[:5]
+
+    except:
+        return []
 
 
 def generate_data():
@@ -35,43 +49,41 @@ def generate_data():
     rows = []
     rank = 1
 
-    for game in games:
+    for home, away, matchup in games:
 
-        rows.append({
-            "Rank": rank,
-            "Player": "Example Player",
-            "Matchup": game,
-            "Book": "DraftKings",
-            "Line": 22.5,
-            "Projection": 25.1,
-            "Edge": "+2.6"
-        })
+        home_players = get_roster(home)
+        away_players = get_roster(away)
 
-        rows.append({
-            "Rank": rank,
-            "Player": "Example Player",
-            "Matchup": game,
-            "Book": "FanDuel",
-            "Line": 21.5,
-            "Projection": 25.1,
-            "Edge": "+3.6"
-        })
+        for player in home_players + away_players:
 
-        rank += 1
+            rows.append({
+                "Rank": rank,
+                "Player": player,
+                "Matchup": matchup,
+                "Book": "DraftKings",
+                "Line": 22.5,
+                "Projection": 25.1,
+                "Edge": 2.6
+            })
 
-    if len(rows) == 0:
-        rows.append({
-            "Rank": 1,
-            "Player": "No Games Today",
-            "Matchup": "N/A",
-            "Book": "N/A",
-            "Line": 0,
-            "Projection": 0,
-            "Edge": "0"
-        })
+            rows.append({
+                "Rank": rank,
+                "Player": player,
+                "Matchup": matchup,
+                "Book": "FanDuel",
+                "Line": 21.5,
+                "Projection": 25.1,
+                "Edge": 3.6
+            })
+
+            rank += 1
 
     df = pd.DataFrame(rows)
 
     df.to_csv(DATA_FILE, index=False)
 
-    print("props_data.csv generated")
+    print("props_data.csv updated with real players")
+
+
+if name == "main":
+    generate_data()
