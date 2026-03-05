@@ -4,11 +4,7 @@ import numpy as np
 from datetime import datetime
 
 from nba_api.stats.static import players
-from nba_api.stats.endpoints import (
-    playergamelog,
-    scoreboardv2,
-    leaguedashteamstats
-)
+from nba_api.stats.endpoints import playergamelog, scoreboardv2, leaguedashteamstats
 
 st.set_page_config(page_title="NBA Props Scanner", layout="wide")
 
@@ -22,40 +18,44 @@ STAT = st.selectbox("Stat Type", ["PTS","REB","AST"])
 today = datetime.today().strftime("%m/%d/%Y")
 
 
-# ------------------------
-# CACHED FUNCTIONS
-# ------------------------
+# ----------------------------
+# CACHE FUNCTIONS
+# ----------------------------
 
 @st.cache_data(ttl=3600)
 def get_today_games(date):
-    board = scoreboardv2.ScoreboardV2(game_date=date)
-    return board.get_data_frames()[0]
+    try:
+        board = scoreboardv2.ScoreboardV2(game_date=date)
+        return board.get_data_frames()[0]
+    except:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def get_team_stats():
-    stats = leaguedashteamstats.LeagueDashTeamStats(season="2025-26")
-    return stats.get_data_frames()[0]
+    try:
+        stats = leaguedashteamstats.LeagueDashTeamStats(season="2025-26")
+        return stats.get_data_frames()[0]
+    except:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def get_player_logs(player_id):
-    gamelog = playergamelog.PlayerGameLog(player_id=player_id)
-    return gamelog.get_data_frames()[0]
+    try:
+        gamelog = playergamelog.PlayerGameLog(player_id=player_id)
+        return gamelog.get_data_frames()[0]
+    except:
+        return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
-def get_active_players():
-    return players.get_active_players()
-
-
-# ------------------------
+# ----------------------------
 # GET TODAY'S GAMES
-# ------------------------
+# ----------------------------
 
 games = get_today_games(today)
 
-if len(games) == 0:
+if games.empty:
     st.warning("No NBA games today")
     st.stop()
 
@@ -64,16 +64,23 @@ team_ids = set(games["HOME_TEAM_ID"]).union(set(games["VISITOR_TEAM_ID"]))
 st.write(f"Games today: {len(team_ids)//2}")
 
 
-# ------------------------
-# TEAM DATA
-# ------------------------
+# ----------------------------
+# TEAM STATS
+# ----------------------------
 
 team_stats = get_team_stats()
+
+if team_stats.empty:
+    st.error("Team stats failed to load")
+    st.stop()
 
 def_rank = team_stats.sort_values("PTS").reset_index(drop=True)
 def_rank["DEF_RANK"] = def_rank.index + 1
 
 defense_dict = dict(zip(def_rank["TEAM_ID"], def_rank["DEF_RANK"]))
+
+
+# SAFE PACE HANDLING
 
 if "PACE" in team_stats.columns:
     pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE"]))
@@ -83,38 +90,25 @@ else:
     pace_dict = dict(zip(team_stats["TEAM_ID"], [100]*len(team_stats)))
 
 
-# ------------------------
-# GET PLAYERS FROM TEAMS PLAYING TODAY
-# ------------------------
+# ----------------------------
+# GET ACTIVE PLAYERS
+# ----------------------------
 
-all_players = get_active_players()
+all_players = players.get_active_players()
 
-players_today = []
-
-for p in all_players:
-    try:
-        df = get_player_logs(p["id"])
-        if len(df) == 0:
-            continue
-
-        team_id = df.iloc[0]["TEAM_ID"]
-
-        if team_id in team_ids:
-            players_today.append(p)
-
-    except:
-        continue
-
+# LIMIT PLAYERS TO SPEED UP
+all_players = all_players[:60]
 
 results = []
 
 progress = st.progress(0)
 
-# ------------------------
-# PLAYER MODEL
-# ------------------------
 
-for i,p in enumerate(players_today):
+# ----------------------------
+# PLAYER MODEL
+# ----------------------------
+
+for i,p in enumerate(all_players):
 
     name = p["full_name"]
     player_id = p["id"]
@@ -123,7 +117,16 @@ for i,p in enumerate(players_today):
 
         df = get_player_logs(player_id)
 
+        if df.empty:
+            continue
+
         if len(df) < 5:
+            continue
+
+        team_id = df.iloc[0]["TEAM_ID"]
+
+        # Only players playing today
+        if team_id not in team_ids:
             continue
 
         matchup = df.iloc[0]["MATCHUP"]
@@ -142,8 +145,6 @@ for i,p in enumerate(players_today):
         )
 
         projection = stat_per_min * projected_minutes
-
-        team_id = df.iloc[0]["TEAM_ID"]
 
         pace = pace_dict.get(team_id,100)
 
@@ -179,16 +180,16 @@ for i,p in enumerate(players_today):
     except:
         continue
 
-    progress.progress((i+1)/len(players_today))
+    progress.progress((i+1)/len(all_players))
 
 
-# ------------------------
+# ----------------------------
 # RESULTS
-# ------------------------
+# ----------------------------
 
 df = pd.DataFrame(results)
 
-if len(df) == 0:
+if df.empty:
     st.warning("No props found")
     st.stop()
 
@@ -205,6 +206,6 @@ st.subheader("🔥 Top NBA Props")
 
 st.dataframe(df.head(25), use_container_width=True)
 
-st.subheader("📊 Full Model")
+st.subheader("📊 Full Model Output")
 
 st.dataframe(df, use_container_width=True)
