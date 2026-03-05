@@ -10,7 +10,9 @@ from nba_api.stats.endpoints import (
     leaguedashteamstats
 )
 
-st.title("🔥 NBA AI Prop Model (2025-26)")
+st.set_page_config(page_title="NBA Props Scanner", layout="wide")
+
+st.title("🔥 Best NBA Props Scanner")
 
 if st.button("Refresh Model"):
     st.cache_data.clear()
@@ -20,9 +22,9 @@ STAT = st.selectbox("Stat Type", ["PTS","REB","AST"])
 today = datetime.today().strftime("%m/%d/%Y")
 
 
-# ----------------------------
+# ------------------------
 # CACHED FUNCTIONS
-# ----------------------------
+# ------------------------
 
 @st.cache_data(ttl=3600)
 def get_today_games(date):
@@ -49,9 +51,9 @@ def get_active_players():
     return players.get_active_players()
 
 
-# ----------------------------
+# ------------------------
 # LOAD DATA
-# ----------------------------
+# ------------------------
 
 games = get_today_games(today)
 
@@ -65,23 +67,39 @@ st.write(f"Games today: {len(team_ids)//2}")
 
 team_stats = get_team_stats()
 
+
+# ------------------------
+# DEFENSE RANK
+# ------------------------
+
 def_rank = team_stats.sort_values("PTS").reset_index(drop=True)
 def_rank["DEF_RANK"] = def_rank.index + 1
 
 defense_dict = dict(zip(def_rank["TEAM_ID"], def_rank["DEF_RANK"]))
 
-pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE"]))
 
-active_players = get_active_players()
+# ------------------------
+# SAFE PACE FIX
+# ------------------------
+
+if "PACE" in team_stats.columns:
+    pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE"]))
+elif "PACE_PER_GAME" in team_stats.columns:
+    pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE_PER_GAME"]))
+else:
+    pace_dict = dict(zip(team_stats["TEAM_ID"], [100]*len(team_stats)))
+
+
+active_players = get_active_players()[:150]
 
 results = []
 
 progress = st.progress(0)
 
 
-# ----------------------------
+# ------------------------
 # PLAYER MODEL
-# ----------------------------
+# ------------------------
 
 for i,p in enumerate(active_players):
 
@@ -102,21 +120,28 @@ for i,p in enumerate(active_players):
 
         matchup = df.iloc[0]["MATCHUP"]
 
-        last5 = df.head(5)[STAT].mean()
-        last10 = df.head(10)[STAT].mean()
-        season = df[STAT].mean()
+        minutes_last5 = df.head(5)["MIN"].mean()
+        minutes_season = df["MIN"].mean()
 
-        projection = (
-            last5 * 0.5 +
-            last10 * 0.3 +
-            season * 0.2
+        if minutes_season < 15:
+            continue
+
+        stat_per_min = df[STAT].sum() / df["MIN"].sum()
+
+        projected_minutes = (
+            minutes_last5 * 0.6 +
+            minutes_season * 0.4
         )
+
+        projection = stat_per_min * projected_minutes
 
         pace = pace_dict.get(team_id,100)
 
         projection = projection * (pace/100)
 
-        line = round(season,1)
+        season_avg = df[STAT].mean()
+
+        line = round(season_avg,1)
 
         std = df[STAT].std()
 
@@ -135,7 +160,7 @@ for i,p in enumerate(active_players):
             "Player": name,
             "Matchup": matchup,
             "Opp DEF Rank": defense_rank,
-            "Line": line,
+            "Line": round(line,1),
             "Projection": round(projection,2),
             "Edge": round(edge,2),
             "Over Prob %": round(prob*100,1)
@@ -147,9 +172,9 @@ for i,p in enumerate(active_players):
     progress.progress((i+1)/len(active_players))
 
 
-# ----------------------------
+# ------------------------
 # RESULTS
-# ----------------------------
+# ------------------------
 
 df = pd.DataFrame(results)
 
@@ -166,10 +191,11 @@ df = df.sort_values(
 
 df.insert(0,"Rank",range(1,len(df)+1))
 
-st.subheader("🔥 TOP NBA BETS TODAY")
+
+st.subheader("🔥 Top NBA Props")
 
 st.dataframe(df.head(25), use_container_width=True)
 
-st.subheader("📊 Full Model Output")
+st.subheader("📊 Full Model")
 
 st.dataframe(df, use_container_width=True)
