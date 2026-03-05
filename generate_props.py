@@ -85,5 +85,5 @@ def generate_data():
     print("props_data.csv updated with real players")
 
 
-if name == "__main__":
+if name == "__name__":
     generate_data()
