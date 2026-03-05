@@ -34,9 +34,7 @@ def get_today_games(date):
 
 @st.cache_data(ttl=3600)
 def get_team_stats():
-    stats = leaguedashteamstats.LeagueDashTeamStats(
-        season="2025-26"
-    )
+    stats = leaguedashteamstats.LeagueDashTeamStats(season="2025-26")
     return stats.get_data_frames()[0]
 
 
@@ -52,7 +50,7 @@ def get_active_players():
 
 
 # ------------------------
-# LOAD DATA
+# GET TODAY'S GAMES
 # ------------------------
 
 games = get_today_games(today)
@@ -65,22 +63,17 @@ team_ids = set(games["HOME_TEAM_ID"]).union(set(games["VISITOR_TEAM_ID"]))
 
 st.write(f"Games today: {len(team_ids)//2}")
 
+
+# ------------------------
+# TEAM DATA
+# ------------------------
+
 team_stats = get_team_stats()
-
-
-# ------------------------
-# DEFENSE RANK
-# ------------------------
 
 def_rank = team_stats.sort_values("PTS").reset_index(drop=True)
 def_rank["DEF_RANK"] = def_rank.index + 1
 
 defense_dict = dict(zip(def_rank["TEAM_ID"], def_rank["DEF_RANK"]))
-
-
-# ------------------------
-# SAFE PACE FIX
-# ------------------------
 
 if "PACE" in team_stats.columns:
     pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE"]))
@@ -90,18 +83,38 @@ else:
     pace_dict = dict(zip(team_stats["TEAM_ID"], [100]*len(team_stats)))
 
 
-active_players = get_active_players()[:150]
+# ------------------------
+# GET PLAYERS FROM TEAMS PLAYING TODAY
+# ------------------------
+
+all_players = get_active_players()
+
+players_today = []
+
+for p in all_players:
+    try:
+        df = get_player_logs(p["id"])
+        if len(df) == 0:
+            continue
+
+        team_id = df.iloc[0]["TEAM_ID"]
+
+        if team_id in team_ids:
+            players_today.append(p)
+
+    except:
+        continue
+
 
 results = []
 
 progress = st.progress(0)
 
-
 # ------------------------
 # PLAYER MODEL
 # ------------------------
 
-for i,p in enumerate(active_players):
+for i,p in enumerate(players_today):
 
     name = p["full_name"]
     player_id = p["id"]
@@ -111,11 +124,6 @@ for i,p in enumerate(active_players):
         df = get_player_logs(player_id)
 
         if len(df) < 5:
-            continue
-
-        team_id = df.iloc[0]["TEAM_ID"]
-
-        if team_id not in team_ids:
             continue
 
         matchup = df.iloc[0]["MATCHUP"]
@@ -134,6 +142,8 @@ for i,p in enumerate(active_players):
         )
 
         projection = stat_per_min * projected_minutes
+
+        team_id = df.iloc[0]["TEAM_ID"]
 
         pace = pace_dict.get(team_id,100)
 
@@ -169,7 +179,7 @@ for i,p in enumerate(active_players):
     except:
         continue
 
-    progress.progress((i+1)/len(active_players))
+    progress.progress((i+1)/len(players_today))
 
 
 # ------------------------
@@ -190,7 +200,6 @@ df = df.sort_values(
 )
 
 df.insert(0,"Rank",range(1,len(df)+1))
-
 
 st.subheader("🔥 Top NBA Props")
 
