@@ -1,4 +1,6 @@
 streamlit
 numpy
 pandas
+matplotlib
+nba_api
 scikit-learn
