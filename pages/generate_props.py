@@ -1,21 +1,28 @@
+1"}
 import pandas as pd
 import requests
 import datetime
-import os
 
 DATA_FILE = "props_data.csv"
 
 def get_games_today():
-    today = datetime.date.today().strftime("%Y-%m-%d")
+    today = datetime.date.today().strftime("%Y%m%d")
+
     url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={today}"
-    
-    r = requests.get(url).json()
+
+    response = requests.get(url)
+    data = response.json()
+
     games = []
 
-    for event in r["events"]:
-        home = event["competitions"][0]["competitors"][0]["team"]["abbreviation"]
-        away = event["competitions"][0]["competitors"][1]["team"]["abbreviation"]
-        games.append(f"{away} @ {home}")
+    if "events" in data:
+        for event in data["events"]:
+            comp = event["competitions"][0]
+
+            home = comp["competitors"][0]["team"]["abbreviation"]
+            away = comp["competitors"][1]["team"]["abbreviation"]
+
+            games.append(f"{away} @ {home}")
 
     return games
 
@@ -26,12 +33,12 @@ def generate_data():
 
     rows = []
 
-    for i, g in enumerate(games):
+    for i, game in enumerate(games):
 
         rows.append({
-            "Rank": i+1,
+            "Rank": i + 1,
             "Player": f"Player {i+1}",
-            "Matchup": g,
+            "Matchup": game,
             "Book": "DraftKings",
             "Line": 22.5,
             "Projection": 25.1,
@@ -39,9 +46,9 @@ def generate_data():
         })
 
         rows.append({
-            "Rank": i+1,
+            "Rank": i + 1,
             "Player": f"Player {i+1}",
-            "Matchup": g,
+            "Matchup": game,
             "Book": "FanDuel",
             "Line": 21.5,
             "Projection": 25.1,
@@ -52,8 +59,39 @@ def generate_data():
 
     df.to_csv(DATA_FILE, index=False)
 
-    print("Data file created!")
+    print("Props data generated")
 
 
-if __name__ == "__main__":
-    generate_data()
+if name == "main":
+    generate_dat
+    games = get_games_today()
+
+rows = []
+
+for i, game in enumerate(games):
+
+    rows.append({
+        "Rank": i + 1,
+        "Player": f"Player {i+1}",
+        "Matchup": game,
+        "Book": "DraftKings",
+        "Line": 22.5,
+        "Projection": 25.1,
+        "Edge": "+2.6"
+    })
+
+    rows.append({
+        "Rank": i + 1,
+        "Player": f"Player {i+1}",
+        "Matchup": game,
+        "Book": "FanDuel",
+        "Line": 21.5,
+        "Projection": 25.1,
+        "Edge": "+3.6"
+    })
+
+df = pd.DataFrame(rows)
+
+df.to_csv(DATA_FILE, index=False)
+
+print("Props data generated")
