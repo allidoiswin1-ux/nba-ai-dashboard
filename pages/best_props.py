@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime
 
 from nba_api.stats.static import players
-from nba_api.stats.endpoints import playergamelog, scoreboardv2, leaguedashteamstats
+from nba_api.stats.endpoints import playergamelog, scoreboardv2
 
 st.set_page_config(page_title="NBA Props Scanner", layout="wide")
 
@@ -18,24 +18,11 @@ STAT = st.selectbox("Stat Type", ["PTS","REB","AST"])
 today = datetime.today().strftime("%m/%d/%Y")
 
 
-# ----------------------------
-# CACHE FUNCTIONS
-# ----------------------------
-
 @st.cache_data(ttl=3600)
 def get_today_games(date):
     try:
         board = scoreboardv2.ScoreboardV2(game_date=date)
         return board.get_data_frames()[0]
-    except:
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=3600)
-def get_team_stats():
-    try:
-        stats = leaguedashteamstats.LeagueDashTeamStats(season="2025-26")
-        return stats.get_data_frames()[0]
     except:
         return pd.DataFrame()
 
@@ -49,10 +36,6 @@ def get_player_logs(player_id):
         return pd.DataFrame()
 
 
-# ----------------------------
-# GET TODAY'S GAMES
-# ----------------------------
-
 games = get_today_games(today)
 
 if games.empty:
@@ -64,51 +47,16 @@ team_ids = set(games["HOME_TEAM_ID"]).union(set(games["VISITOR_TEAM_ID"]))
 st.write(f"Games today: {len(team_ids)//2}")
 
 
-# ----------------------------
-# TEAM STATS
-# ----------------------------
-
-team_stats = get_team_stats()
-
-if team_stats.empty:
-    st.error("Team stats failed to load")
-    st.stop()
-
-def_rank = team_stats.sort_values("PTS").reset_index(drop=True)
-def_rank["DEF_RANK"] = def_rank.index + 1
-
-defense_dict = dict(zip(def_rank["TEAM_ID"], def_rank["DEF_RANK"]))
-
-
-# SAFE PACE HANDLING
-
-if "PACE" in team_stats.columns:
-    pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE"]))
-elif "PACE_PER_GAME" in team_stats.columns:
-    pace_dict = dict(zip(team_stats["TEAM_ID"], team_stats["PACE_PER_GAME"]))
-else:
-    pace_dict = dict(zip(team_stats["TEAM_ID"], [100]*len(team_stats)))
-
-
-# ----------------------------
-# GET ACTIVE PLAYERS
-# ----------------------------
-
 all_players = players.get_active_players()
 
-# LIMIT PLAYERS TO SPEED UP
-all_players = all_players[:60]
+# LIMIT PLAYERS (major speed fix)
+players_to_scan = all_players[:25]
 
 results = []
 
 progress = st.progress(0)
 
-
-# ----------------------------
-# PLAYER MODEL
-# ----------------------------
-
-for i,p in enumerate(all_players):
+for i,p in enumerate(players_to_scan):
 
     name = p["full_name"]
     player_id = p["id"]
@@ -120,39 +68,20 @@ for i,p in enumerate(all_players):
         if df.empty:
             continue
 
-        if len(df) < 5:
-            continue
-
         team_id = df.iloc[0]["TEAM_ID"]
 
-        # Only players playing today
         if team_id not in team_ids:
             continue
 
-        matchup = df.iloc[0]["MATCHUP"]
-
-        minutes_last5 = df.head(5)["MIN"].mean()
-        minutes_season = df["MIN"].mean()
-
-        if minutes_season < 15:
+        if len(df) < 5:
             continue
 
-        stat_per_min = df[STAT].sum() / df["MIN"].sum()
+        last5 = df.head(5)[STAT].mean()
+        season = df[STAT].mean()
 
-        projected_minutes = (
-            minutes_last5 * 0.6 +
-            minutes_season * 0.4
-        )
+        projection = (last5 * 0.7) + (season * 0.3)
 
-        projection = stat_per_min * projected_minutes
-
-        pace = pace_dict.get(team_id,100)
-
-        projection = projection * (pace/100)
-
-        season_avg = df[STAT].mean()
-
-        line = round(season_avg,1)
+        line = round(season,1)
 
         std = df[STAT].std()
 
@@ -165,12 +94,9 @@ for i,p in enumerate(all_players):
 
         edge = projection - line
 
-        defense_rank = defense_dict.get(team_id,15)
-
         results.append({
             "Player": name,
-            "Matchup": matchup,
-            "Opp DEF Rank": defense_rank,
+            "Matchup": df.iloc[0]["MATCHUP"],
             "Line": round(line,1),
             "Projection": round(projection,2),
             "Edge": round(edge,2),
@@ -180,20 +106,14 @@ for i,p in enumerate(all_players):
     except:
         continue
 
-    progress.progress((i+1)/len(all_players))
+    progress.progress((i+1)/len(players_to_scan))
 
-
-# ----------------------------
-# RESULTS
-# ----------------------------
 
 df = pd.DataFrame(results)
 
 if df.empty:
     st.warning("No props found")
     st.stop()
-
-df = df[df["Edge"] > 1]
 
 df = df.sort_values(
     ["Over Prob %","Edge"],
@@ -202,10 +122,6 @@ df = df.sort_values(
 
 df.insert(0,"Rank",range(1,len(df)+1))
 
-st.subheader("🔥 Top NBA Props")
-
-st.dataframe(df.head(25), use_container_width=True)
-
-st.subheader("📊 Full Model Output")
+st.subheader("🔥 Top Props")
 
 st.dataframe(df, use_container_width=True)
