@@ -1,0 +1,5 @@
+013"}
+streamlit
+pandas
+requests
+streamlit-autore
