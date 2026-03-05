@@ -42,14 +42,16 @@ if player_name:
 
         std = df[stat].std()
 
-        if std == 0:
+     std = df[stat].std()
+
+if std == 0:
     prob_over = 0.5
 else:
     prob_over = 1 - (
         0.5 * (1 + math.erf((line - projection) / (std * math.sqrt(2))))
     )
 
-        edge = projection - line
+edge = projection - line
 
         col1,col2,col3 = st.columns(3)
 
