@@ -2,7 +2,7 @@ from sklearn.linear_model import LinearRegression
 
 
 def train_model(players, teams):
-
+    
     df = players.merge(teams, on="TEAM_ID")
 
     X = df[[
