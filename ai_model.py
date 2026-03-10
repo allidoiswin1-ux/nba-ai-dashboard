@@ -1,7 +1,7 @@
 from sklearn.linear_model import LinearRegression
 
 
-def train_model(players, teams):
+def train_model(create_projections):
     
     df = players.merge(teams, on="TEAM_ID")
 
