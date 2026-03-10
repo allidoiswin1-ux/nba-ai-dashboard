@@ -1,10 +1,9 @@
-import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 
-def train_projection_model(player_data, pace_data):
+def train_model(players, teams):
 
-    df = player_data.merge(pace_data, on="TEAM_ID")
+    df = players.merge(teams, on="TEAM_ID")
 
     X = df[[
         "MIN",
@@ -22,9 +21,9 @@ def train_projection_model(player_data, pace_data):
     return model
 
 
-def generate_ai_projections(model, player_data, pace_data):
+def create_projections(model, players, teams):
 
-    df = player_data.merge(pace_data, on="TEAM_ID")
+    df = players.merge(teams, on="TEAM_ID")
 
     X = df[[
         "MIN",
@@ -33,6 +32,6 @@ def generate_ai_projections(model, player_data, pace_data):
         "DEF_RATING"
     ]]
 
-    df["AI_PROJ"] = model.predict(X)
+    df["PROJECTION"] = model.predict(X)
 
     return df
